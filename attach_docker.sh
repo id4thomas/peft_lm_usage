@@ -1,0 +1,1 @@
+docker exec -it tensorrt_22_12 /bin/bash

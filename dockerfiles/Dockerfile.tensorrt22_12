@@ -1,0 +1,33 @@
+FROM nvcr.io/nvidia/tensorrt:22.12-py3
+# https://docs.nvidia.com/deeplearning/tensorrt/container-release-notes/index.html#rel-22-12
+# Ubuntu 20.04
+# CUDA 11.8
+# TensorRT 8.5.1
+# cuBLAS 11.11.3.6
+# cuDNN 8.7.0
+# NCCL 2.15.5
+
+RUN mkdir /usr/app
+WORKDIR /usr/app
+
+RUN apt-get update \
+    && apt-get install -y vim wget gcc make git cmake g++ curl
+
+# For Python venv
+RUN apt-get install -y python3.8-venv
+
+COPY requirements/requirements.torch2.txt requirements.torch2
+
+RUN python3 -m venv env \
+    && source env/bin/activate \
+    && pip install -r requirements.torch2 \
+    && pip install ipykernel \
+    && python -m ipykernel install --user --name=user
+
+RUN source env/bin/activate \
+    && pip install nvidia-pyindex \
+    && pip install nvidia-tensorrt \
+    && pip install torch-tensorrt==1.4.0 \
+    && pip install pytorch-quantization --extra-index-url https://pypi.ngc.nvidia.com
+
+EXPOSE 8000

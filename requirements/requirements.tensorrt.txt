@@ -1,0 +1,4 @@
+pytorch-quantization
+torch-tensorrt==1.4.0
+-i https://pypi.ngc.nvidia.com
+-i https://pypi.python.org/simple
