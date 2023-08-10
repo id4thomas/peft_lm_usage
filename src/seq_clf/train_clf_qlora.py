@@ -47,9 +47,11 @@ def load_kbit_pretrained_model(pretrained_model_name):
 	model = AutoModelForSequenceClassification.from_pretrained(
 		pretrained_model_name, 
 		quantization_config=bnb_config,
-		device_map={"":0}, # FOR GPU 0
-		pretraining_tp = 1 # NEEDED OR mat1 mat2 shape err - see llama hf documentation
+		device_map={"":0} # FOR GPU 0
 	)
+	if ("gpt" in pretrained_model_name) or ("polyglot" in pretrained_model_name):
+		model.config.pad_token_id = model.config.eos_token_id
+		
 	return model
 
 ## Train Preparation
@@ -63,11 +65,14 @@ def prepare_lora_model(config):
 
 	return lora_model
 
-
 def compute_metrics(eval_pred):
 	metric = evaluate.load("accuracy")
 	labels = eval_pred.label_ids
-	predictions = eval_pred.predictions.argmax(-1)
+	# eval_pred.predictions: length 2 tuple
+	# idx0: logits
+	# idx1: length 28 tuple?
+	predictions = eval_pred.predictions[0].argmax(-1)
+	# predictions = [logit.argmax(-1) for logit in eval_pred.predictions[1]]
 	return metric.compute(predictions=predictions, references=labels)
 
 def get_training_args(config, train_run_name, model_save_dir):
@@ -113,35 +118,6 @@ def get_training_args(config, train_run_name, model_save_dir):
 		ddp_find_unused_parameters = config.get("ddp_find_unused_parameters", False)
 	)
 
-def batch_tokenize_preprocess_dec(batch, tokenizer, max_length, input_template = "{} {}", add_eos_token = True):
-    source, target = batch["source"], batch["target"]
-    
-    if add_eos_token:
-        input_template += tokenizer.eos_token
-    input_sents = [input_template.format(s,t) for s,t in zip(source, target)]
-    
-    tokenized = tokenizer(input_sents, 
-                                 truncation=True, 
-                                 max_length=max_length, 
-                                 padding="max_length", add_special_tokens = True)
-      
-    # batch = {k: v for k, v in tokenized.items()}
-    batch = {
-        "input_ids": tokenized["input_ids"], 
-        "attention_mask": tokenized["attention_mask"]
-    }
-
-    # Ignore padding in the loss (-100 is ignored) - Masking
-    # batch["labels"] = [
-    #     [-100 if token == tokenizer.pad_token_id else token for token in l]
-    #     for l in tokenized["input_ids"]
-    # ]
-
-    # Sentence too
-    batch["source"] = source
-    batch["target"] = target
-    return batch
-
 def train(config, save_trained = True):
 	# random seed
 	set_seed(config.get("seed", 42))
@@ -149,6 +125,9 @@ def train(config, save_trained = True):
 	# Load Data
 	pretrained_model_name = config.get("pretrained_model")
 	tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name)
+	if ("gpt" in pretrained_model_name) or ("polyglot" in pretrained_model_name):
+		tokenizer.pad_token = tokenizer.eos_token
+		tokenizer.pad_token_id = tokenizer.eos_token_id
 
 	train_ds, val_ds = load_dataset_from_dir(
 		config.get("data_dir"),
