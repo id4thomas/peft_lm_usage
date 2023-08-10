@@ -8,7 +8,6 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, GPTNeoXForSequenceClassification
 from transformers import BitsAndBytesConfig
 from transformers import Trainer, TrainingArguments
-from datasets import load_dataset
 
 from utils.common_utils import set_seed
 from utils.peft_utils import get_lora_config, get_lora_model, get_lora_save_param_dict
@@ -21,10 +20,18 @@ import numpy as np
 
 from utils.data_utils import load_data_to_dataset, process_dataset
 
-def load_dataset(data_dir, data_prefix, tokenizer, config):
+def load_dataset_from_dir(data_dir, data_prefix, tokenizer, config):
 	train_ds = load_data_to_dataset(os.path.join(data_dir, f"{data_prefix}-train.tsv"))
 	val_ds = load_data_to_dataset(os.path.join(data_dir, f"{data_prefix}-train.tsv"))
 
+	if config.get("use_template", False):
+		input_template = config.get("input_template", "{}")
+		train_ds = train_ds.map(
+			lambda x: {'source': input_template.format(x["source"])}
+		)
+		val_ds = train_ds.map(
+			lambda x: {'source': input_template.format(x)}
+		)
 	# Preprocess
 	train_ds = process_dataset(train_ds, tokenizer, config)
 	val_ds = process_dataset(train_ds, tokenizer, config)
@@ -102,8 +109,38 @@ def get_training_args(config, train_run_name, model_save_dir):
 		# System
 		seed = config["seed"],
 		fp16 = config["fp16"],
-		bf16 = config["bf16"]
+		bf16 = config["bf16"],
+		ddp_find_unused_parameters = config.get("ddp_find_unused_parameters", False)
 	)
+
+def batch_tokenize_preprocess_dec(batch, tokenizer, max_length, input_template = "{} {}", add_eos_token = True):
+    source, target = batch["source"], batch["target"]
+    
+    if add_eos_token:
+        input_template += tokenizer.eos_token
+    input_sents = [input_template.format(s,t) for s,t in zip(source, target)]
+    
+    tokenized = tokenizer(input_sents, 
+                                 truncation=True, 
+                                 max_length=max_length, 
+                                 padding="max_length", add_special_tokens = True)
+      
+    # batch = {k: v for k, v in tokenized.items()}
+    batch = {
+        "input_ids": tokenized["input_ids"], 
+        "attention_mask": tokenized["attention_mask"]
+    }
+
+    # Ignore padding in the loss (-100 is ignored) - Masking
+    # batch["labels"] = [
+    #     [-100 if token == tokenizer.pad_token_id else token for token in l]
+    #     for l in tokenized["input_ids"]
+    # ]
+
+    # Sentence too
+    batch["source"] = source
+    batch["target"] = target
+    return batch
 
 def train(config, save_trained = True):
 	# random seed
@@ -113,7 +150,7 @@ def train(config, save_trained = True):
 	pretrained_model_name = config.get("pretrained_model")
 	tokenizer = AutoTokenizer.from_pretrained(pretrained_model_name)
 
-	train_ds, val_ds = load_dataset(
+	train_ds, val_ds = load_dataset_from_dir(
 		config.get("data_dir"),
 		config.get("data_prefix"),
 		tokenizer,

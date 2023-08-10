@@ -3,3 +3,4 @@ src/causal_lm/wandb
 src/seq_clf/wandb
 *.pyc
 *bak
+tests/
