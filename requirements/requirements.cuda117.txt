@@ -3,6 +3,6 @@ torch==1.13.1+cu117
 torchtext==0.14.1
 torchaudio==0.13.1
 torchvision==0.14.1+cu117
-transformers==4.30.2
+transformers==4.36.0
 -f https://download.pytorch.org/whl/torch_stable.html 
 -i https://pypi.python.org/simple
